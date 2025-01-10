@@ -14,7 +14,8 @@
             "-mmacosx-version-min=10.9"
         ],
         "libraries": [
-            "pthread"
+            "pthread",
+            "curl"
         ],
         "name": "parallel_code",
         "sources": [

@@ -1,103 +1,115 @@
-# 设置 Cython 语言级别
-# cython: language_level=3
+# http_client.pyx
+from libc.stdlib cimport malloc, free
+from libc.string cimport strcpy, strlen
+from cpython.bytes cimport PyBytes_FromString
+import socket
+import json
 
-cdef extern from "stdio.h":
-    int printf(const char *format, ...) nogil  # 明确声明 printf 为 C 函数
-
-cdef extern from "stdlib.h":
-    void* malloc(size_t size) nogil
-    void free(void* ptr) nogil
-    void* memcpy(void* dest, const void* src, size_t n) nogil
-
-cdef extern from "pthread.h":
-    ctypedef struct pthread_t:
-        pass
-    int pthread_create(pthread_t* thread, void* attr, void* (*start_routine)(void*) noexcept nogil, void* arg)
-    int pthread_join(pthread_t thread, void* retval)
-
-cdef extern from "unistd.h":
-    void usleep(long usec) nogil
-
-# 引入 libcurl 进行 HTTP 请求
-cdef extern from "curl/curl.h":
-    ctypedef void CURL
-    ctypedef int CURLcode  # 修正 CURLcode 的定义
-    CURL* curl_easy_init()
-    CURLcode curl_easy_setopt(CURL* curl, int option, ...)
-    CURLcode curl_easy_perform(CURL* curl)
-    void curl_easy_cleanup(CURL* curl)
-    int CURLOPT_URL
-    int CURLOPT_WRITEDATA
-    int CURLOPT_WRITEFUNCTION
-    int CURLE_OK
-
-# 定义回调函数来处理 HTTP 响应数据
-cdef size_t write_callback(void* ptr, size_t size, size_t nmemb, void* userdata) nogil:
-    cdef size_t real_size = size * nmemb
-    cdef char* data = <char*>ptr
-    cdef char** response = <char**>userdata
-
-    # 分配内存并存储响应数据
-    response[0] = <char*>malloc(real_size + 1)
-    if response[0] == NULL:
-        return 0  # 内存分配失败
-
-    memcpy(response[0], data, real_size)
-    response[0][real_size] = 0  # 添加字符串结束符
-    return real_size
-
-# 定义结构体来传递请求参数和结果
-cdef struct RequestArgs:
-    char* url
-    char* response  # 用于存储 HTTP 响应数据
-
-cdef void* task(void* arg) noexcept nogil:
-    cdef RequestArgs* args = <RequestArgs*>arg
-    cdef CURL* curl
-    cdef CURLcode res
-
-    # 初始化 CURL
-    with gil:
-        curl = curl_easy_init()
-        if curl:
-            # 设置 URL
-            curl_easy_setopt(curl, CURLOPT_URL, args.url)
-
-            # 设置回调函数
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, <void*>write_callback)
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &args.response)
-
-            # 执行请求
-            res = curl_easy_perform(curl)
-            if res != CURLE_OK:
-                printf("HTTP 请求失败: %d\n".encode('utf-8'), res)
-
-            # 清理 CURL
-            curl_easy_cleanup(curl)
-        else:
-            printf("CURL 初始化失败\n".encode('utf-8'))
-
-    return NULL
-
-def run_parallel(url: str):
-    cdef pthread_t thread
-    cdef RequestArgs args
-
-    # 将 Python 字符串转换为 C 字符串
-    cdef bytes url_bytes = url.encode('utf-8')
-    args.url = url_bytes
-    args.response = NULL
-
-    # 创建线程并执行 HTTP 请求
-    pthread_create(&thread, NULL, <void* (*)(void*) noexcept nogil>task, <void*>&args)
-    pthread_join(thread, NULL)
-
-    # 将响应数据转换为 Python 字符串
-    cdef str response_str
-    if args.response != NULL:
-        response_str = args.response.decode('utf-8')
-        free(args.response)  # 释放内存
-    else:
-        response_str = ""
-
-    return response_str
+cdef class HttpClient:
+    cdef public str host
+    cdef public int port
+    
+    def __init__(self, str host, int port=80):
+        self.host = host
+        self.port = port
+    
+    cpdef dict get(self, str path, dict headers=None):
+        if headers is None:
+            headers = {}
+        
+        request = self._build_request(b'GET', path.encode(), headers)
+        return self._send_request(request)
+    
+    cpdef dict post(self, str path, dict data=None, dict headers=None):
+        if headers is None:
+            headers = {}
+        if data is None:
+            data = {}
+            
+        # 添加content-type
+        headers['Content-Type'] = 'application/json'
+        body = json.dumps(data).encode()
+        headers['Content-Length'] = str(len(body))
+        
+        request = self._build_request(b'POST', path.encode(), headers, body)
+        return self._send_request(request)
+    
+    cdef bytes _build_request(self, bytes method, bytes path, dict headers, bytes body=b''):
+        cdef list request_parts = []
+        
+        # 添加请求行
+        request_parts.append(b'%s %s HTTP/1.1' % (method, path))
+        
+        # 添加Host头
+        request_parts.append(b'Host: %s' % self.host.encode())
+        
+        # 添加其他headers
+        for key, value in headers.items():
+            header_line = f'{key}: {value}'.encode()
+            request_parts.append(header_line)
+        
+        # 组合请求
+        request = b'\r\n'.join(request_parts)
+        request += b'\r\n\r\n'
+        
+        if body:
+            request += body
+            
+        return request
+    
+    cdef dict _send_request(self, bytes request):
+        cdef:
+            bytes response
+            dict result = {}
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.connect((self.host, self.port))
+                sock.sendall(request)
+                
+                response = b''
+                while True:
+                    data = sock.recv(4096)
+                    if not data:
+                        break
+                    response += data
+                
+                return self._parse_response(response)
+        except Exception as e:
+            return {'error': str(e)}
+    
+    cdef dict _parse_response(self, bytes response):
+        cdef:
+            dict result = {}
+            list parts
+            list header_lines
+            str status_line
+            
+        try:
+            decoded_response = response.decode('utf-8')
+            parts = decoded_response.split('\r\n\r\n', 1)
+            header_lines = parts[0].split('\r\n')
+            status_line = header_lines[0]
+            
+            # 解析状态行
+            status_parts = status_line.split(' ', 2)
+            result['status_code'] = int(status_parts[1])
+            
+            # 解析headers
+            headers = {}
+            for line in header_lines[1:]:
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    headers[key.strip()] = value.strip()
+            result['headers'] = headers
+            
+            # 解析body
+            if len(parts) > 1:
+                try:
+                    result['content'] = json.loads(parts[1])
+                except json.JSONDecodeError:
+                    result['content'] = parts[1]
+                    
+            return result
+        except Exception as e:
+            return {'error': str(e)}
