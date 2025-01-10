@@ -150,9 +150,7 @@ int main(void){
  
     // --- malloc、calloc、realloc
 
-
     Object (*createObj)(int,char*) = &createObject;
-
 
     int n = 5;
     //对于指针数组，当然字符串是char数组一样适用
@@ -162,6 +160,9 @@ int main(void){
     {   
         //2）再初始化
         objects_1[i] = (*createObj)(i,"object_1_name");
+        // C语言中可以使用箭头运算符(->)访问结构体指针的成员
+        // 例如：objects_1[i]->name
+        // 但这里objects_1[i]是结构体对象，不是指针，所以应该用点运算符(.)
         printf("%s \n",objects_1[i].name);
     }
 
