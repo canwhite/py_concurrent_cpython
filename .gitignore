@@ -1,5 +1,7 @@
 # 忽略所有生成的C文件
 *.c
+!pre_message/*.c
+
 
 # 忽略构建目录
 build/
