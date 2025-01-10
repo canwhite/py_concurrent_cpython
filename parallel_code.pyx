@@ -5,31 +5,45 @@ cdef extern from "pthread.h":
     int pthread_create(void* thread, void* attr, void* (*start_routine)(void*) noexcept nogil, void* arg)
     int pthread_join(void* thread, void* retval)
 
-cdef extern from "unistd.h":
-    void usleep(long usec) nogil
+# 定义一个结构体来传递参数和返回值
+cdef struct TaskArgs:
+    int a
+    int b
+    int result  # 用于存储计算结果
 
 cdef void* task(void* arg) noexcept nogil:
-    # 任务代码，不持有GIL且不会抛出异常
-    # usleep(1000000)  # 睡眠1秒
-    cdef int i
-    cdef int result = 0
-    for i in range(1000000):  # 执行100万次简单计算
-        result += i * i  # 计算平方和
-    printf("计算结果: %d\n", result)  # 打印计算结果
+    # 将 void* 指针转换为 TaskArgs 结构体指针
+    cdef TaskArgs* args = <TaskArgs*>arg
 
-    # 这里返回<void*>是因为pthread线程函数的返回值类型必须是void*类型
-    # 虽然我们计算的结果是int类型，但需要将其强制转换为void*指针类型返回
-    # 这是因为pthread_create和pthread_join的接口设计要求线程函数返回void*类型
-    # 在调用pthread_join时，可以通过将void*指针转换回int类型来获取实际的计算结果
-    # 这种设计允许线程函数返回任意类型的数据，只需要将其转换为void*指针即可
-    return <void*>result  # 将结果作为指针返回
+    # 进行计算
+    args.result = args.a + args.b
 
+    # 输出结果
+    printf("计算结果: %d + %d = %d\n", args.a, args.b, args.result)
 
+    # 返回结果指针
+    return <void*>args
 
-def run_parallel():
+def run_parallel(int a, int b):
     cdef void* thread
-    cdef void* retval
-    pthread_create(&thread, NULL, <void* (*)(void*) noexcept nogil>task, NULL)
-    pthread_join(thread, &retval)
-    cdef int result = <int>retval  # 将void*指针转换回int类型
-    return result  # 返回计算结果
+
+
+    cdef TaskArgs args  # 定义参数结构体
+    args.a = a
+    args.b = b
+    args.result = 0  # 初始化结果
+
+    # 创建线程并传递参数
+    # pthread_create 参数解释：
+    #  1. &thread: 线程标识符的指针
+    #  2. NULL: 线程属性，NULL表示使用默认属性
+    #  3. <void* (*)(void*) noexcept nogil>task: 将task函数转换为符合pthread_create要求的函数指针类型
+    #     - void* (*)(void*): 表示返回void*并接受void*参数的函数指针
+    #     - noexcept: 表示该函数不会抛出异常
+    #     - nogil: 表示该函数不需要Python的GIL（全局解释器锁）
+    #  4. <void*>&args: 将args结构体的地址转换为void*指针传递给线程函数
+    pthread_create(&thread, NULL, <void* (*)(void*) noexcept nogil>task, <void*>&args)
+    pthread_join(thread, NULL)
+
+    # 返回计算结果
+    return args.result
