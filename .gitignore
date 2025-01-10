@@ -1,0 +1,17 @@
+# 忽略所有生成的C文件
+*.c
+
+# 忽略构建目录
+build/
+dist/
+*.egg-info/
+
+# 忽略编译后的扩展模块
+*.so
+*.pyd
+*.dylib
+
+# 忽略Cython生成的中间文件
+*.html
+*.cpp
+
