@@ -16,14 +16,14 @@ if os.uname().sysname == 'Darwin':
 extensions = [
     Extension(
         "parallel_code",  # 模块名称
-        sources=["parallel_code.pyx"],  # 只编译 parallel_code.pyx
-        extra_compile_args=extra_compile_args,
+        sources=["pyx/parallel_code.pyx"],  # 只编译 parallel_code.pyx
+        extra_compile_args=extra_compile_args, 
         extra_link_args=extra_link_args,
         libraries=['curl', 'pthread']  # 确保 libcurl 和 pthread 正确链接
     ),
     Extension(
         "parallel_request",  # 模块名称
-        sources=["parallel_request.pyx"],  # 只编译 parallel_request.pyx
+        sources=["pyx/parallel_request.pyx"],  # 只编译 parallel_request.pyx
         extra_compile_args=extra_compile_args,
         extra_link_args=extra_link_args,
         libraries=['curl', 'pthread']  # 确保 libcurl 和 pthread 正确链接
